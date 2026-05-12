@@ -125,7 +125,7 @@ SPECTACULAR_SETTINGS = {
 }
 
 # --- AI Keys ---
-ANTHROPIC_API_KEY = config("ANTHROPIC_API_KEY", default="")
+GROQ_API_KEY = config("GROQ_API_KEY", default="")
 OPENAI_API_KEY = config("OPENAI_API_KEY", default="")
 
 # --- Static / Media ---

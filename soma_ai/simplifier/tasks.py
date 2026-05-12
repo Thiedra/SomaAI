@@ -12,26 +12,23 @@ logger = logging.getLogger(__name__)
 @shared_task(bind=True, max_retries=3)
 def simplify_note_task(self, note_id: str):
     """
-    Celery task: simplify a note using Claude AI.
+    Celery task: simplify a note using Groq AI.
     Retries up to 3 times on failure with exponential backoff.
 
     Args:
-        note_id: UUID string of the Note to simplify.
+        note_id: UUID string of the StudentNote to simplify.
     """
-    from .models import Note, SimplifiedNote
-    from simplifier.services.ai.tts_service import TTSService
-    from simplifier.services.ai.claude_service import ClaudeService
-
+    from .models import StudentNote, SimplifiedNote
+    from simplifier.services.ai.groq_service import GroqService
 
     try:
-        note = Note.objects.select_related("student").get(id=note_id)
+        note = StudentNote.objects.select_related("student").get(id=note_id)
         student = note.student
 
         # get the text to simplify — from pasted text or uploaded file
-        original_text = note.original_text
-        if not original_text and note.original_file:
-            # read text content from uploaded file
-            original_text = note.original_file.read().decode("utf-8", errors="ignore")
+        original_text = note.text_content
+        if not original_text and note.uploaded_file:
+            original_text = note.uploaded_file.read().decode("utf-8", errors="ignore")
 
         # build dyslexia context string for the prompt
         dyslexic_context = (
@@ -51,17 +48,17 @@ Return ONLY valid JSON:
 
 Text: {original_text}
 """
-        service = ClaudeService()
+        service = GroqService()
         result = service.call(prompt, max_tokens=2000, feature="simplifier")
 
         # save or update the simplified note
         SimplifiedNote.objects.update_or_create(
-            note=note,
+            original_note=note,
             defaults={
                 "simplified_text": result["simplified_text"],
                 "glossary": result.get("glossary", []),
                 "reading_level": "simple" if student.is_dyslexic else "intermediate",
-                "ai_model_used": ClaudeService.MODEL,
+                "ai_model_used": GroqService.MODEL,
             },
         )
         logger.info(f"Note {note_id} simplified successfully.")
@@ -73,27 +70,27 @@ Text: {original_text}
 
 
 @shared_task(bind=True, max_retries=3)
-def generate_tts_task(self, tts_request_id: str):
+def generate_tts_task(self, audio_id: str):
     """
     Celery task: generate TTS audio for a simplified note.
-    Updates TTSRequest.status throughout the process.
+    Updates AudioGeneration.status throughout the process.
 
     Args:
-        tts_request_id: UUID string of the TTSRequest to process.
+        audio_id: UUID string of the AudioGeneration to process.
     """
-    from .models import TTSRequest
+    from .models import AudioGeneration
     from django.core.files.base import ContentFile
 
     try:
-        tts = TTSRequest.objects.select_related(
-            "simplified_note__note"
-        ).get(id=tts_request_id)
+        audio = AudioGeneration.objects.select_related(
+            "simplified_note__original_note"
+        ).get(id=audio_id)
 
         # mark as processing so the frontend knows it started
-        tts.status = "processing"
-        tts.save(update_fields=["status"])
+        audio.status = "processing"
+        audio.save(update_fields=["status"])
 
-        text = tts.simplified_note.simplified_text
+        text = audio.simplified_note.simplified_text
 
         # --- TTS generation placeholder ---
         # Replace this block with a real TTS provider (e.g. Google TTS, ElevenLabs)
@@ -101,15 +98,15 @@ def generate_tts_task(self, tts_request_id: str):
         audio_content = ContentFile(
             f"TTS audio for: {text[:100]}".encode("utf-8")
         )
-        filename = f"tts_{tts_request_id}.txt"
-        tts.audio_file.save(filename, audio_content, save=False)
+        filename = f"tts_{audio_id}.txt"
+        audio.audio_file.save(filename, audio_content, save=False)
 
-        tts.status = "done"
-        tts.save(update_fields=["status", "audio_file"])
-        logger.info(f"TTS {tts_request_id} completed.")
+        audio.status = "completed"
+        audio.save(update_fields=["status", "audio_file"])
+        logger.info(f"TTS {audio_id} completed.")
 
     except Exception as exc:
-        logger.error(f"generate_tts_task failed for {tts_request_id}: {exc}")
+        logger.error(f"generate_tts_task failed for {audio_id}: {exc}")
         # mark as failed so the frontend stops polling
-        TTSRequest.objects.filter(id=tts_request_id).update(status="failed")
+        AudioGeneration.objects.filter(id=audio_id).update(status="failed")
         raise self.retry(exc=exc, countdown=60 * (2 ** self.request.retries))

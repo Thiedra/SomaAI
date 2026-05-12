@@ -1,8 +1,8 @@
 """
-simplifier/services/ai/claude_service.py
-Claude (Anthropic) AI service.
-Shared across all apps: simplifier, quizzes, planner, career.
-Import path: from simplifier.services.ai.claude_service import ClaudeService
+simplifier/services/ai/groq_service.py
+Groq AI service — free, ultra-fast inference.
+Drop-in replacement for ClaudeService.
+Import path: from simplifier.services.ai.groq_service import GroqService
 """
 import time
 import logging
@@ -12,18 +12,18 @@ from .base import BaseAIService
 logger = logging.getLogger(__name__)
 
 
-class ClaudeService(BaseAIService):
+class GroqService(BaseAIService):
     """
-    Wraps the Anthropic Claude API.
+    Wraps the Groq API using llama-3.3-70b model.
+    Free tier: 14,400 requests/day, 6,000 tokens/minute.
     Every call is logged to AIRequestLog — success or failure.
-    Used by all AI features in Soma AI.
     """
 
-    MODEL = "claude-opus-4-5"
+    MODEL = "llama-3.3-70b-versatile"
 
     def call(self, prompt: str, max_tokens: int = 1000, feature: str = "unknown") -> dict:
         """
-        Send a prompt to Claude and return a parsed JSON dict.
+        Send a prompt to Groq and return a parsed JSON dict.
 
         Args:
             prompt: Full prompt string to send.
@@ -31,12 +31,12 @@ class ClaudeService(BaseAIService):
             feature: Calling feature name for logging (simplifier, quizzes, planner, career).
 
         Returns:
-            Parsed dict from Claude's JSON response.
+            Parsed dict from Groq's JSON response.
 
         Raises:
-            ValueError: If ANTHROPIC_API_KEY is missing or Claude returns invalid JSON.
+            ValueError: If GROQ_API_KEY is missing or Groq returns invalid JSON.
         """
-        import anthropic
+        from groq import Groq
         from core.models import AIRequestLog
 
         start_time = time.time()
@@ -44,29 +44,29 @@ class ClaudeService(BaseAIService):
         error_message = ""
 
         try:
-            if not settings.ANTHROPIC_API_KEY:
+            if not settings.GROQ_API_KEY:
                 raise ValueError(
-                    "ANTHROPIC_API_KEY is not set in your .env file. "
-                    "Get your key from https://console.anthropic.com/"
+                    "GROQ_API_KEY is not set in your .env file. "
+                    "Get your free key from https://console.groq.com/"
                 )
 
-            client = anthropic.Anthropic(api_key=settings.ANTHROPIC_API_KEY)
+            client = Groq(api_key=settings.GROQ_API_KEY)
 
-            message = client.messages.create(
+            response = client.chat.completions.create(
                 model=self.MODEL,
                 max_tokens=max_tokens,
                 messages=[{"role": "user", "content": prompt}],
             )
 
-            raw_text = message.content[0].text
-            logger.debug(f"Claude raw response [{feature}]: {raw_text[:300]}")
+            raw_text = response.choices[0].message.content
+            logger.debug(f"Groq raw response [{feature}]: {raw_text[:300]}")
 
             return self.parse_json_response(raw_text)
 
         except Exception as e:
             call_status = "failed"
             error_message = str(e)
-            logger.error(f"Claude API call failed [{feature}]: {e}")
+            logger.error(f"Groq API call failed [{feature}]: {e}")
             raise
 
         finally:
