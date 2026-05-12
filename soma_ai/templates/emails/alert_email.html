@@ -1,0 +1,33 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="UTF-8">
+  <style>
+    body { font-family: Inter, Arial, sans-serif; background: #F8F7F4; margin: 0; padding: 0; }
+    .container { max-width: 600px; margin: 40px auto; background: #fff; border-radius: 8px; padding: 32px; }
+    .header { background: #3B6AE8; color: white; padding: 20px 32px; border-radius: 8px 8px 0 0; margin: -32px -32px 24px; }
+    .header h1 { margin: 0; font-size: 20px; }
+    .alert-box { background: #FDECE8; border-left: 4px solid #E85030; padding: 16px; border-radius: 4px; margin: 16px 0; }
+    .footer { margin-top: 32px; font-size: 12px; color: #888; }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <div class="header">
+      <h1>Soma AI — Student Alert</h1>
+    </div>
+    <p>Hello <strong>{{ teacher_name }}</strong>,</p>
+    <p>One of your students needs your attention:</p>
+    <div class="alert-box">
+      <strong>Student:</strong> {{ student_name }}<br>
+      <strong>Alert Type:</strong> {{ alert_type }}<br>
+      <strong>Message:</strong> {{ message }}
+    </div>
+    <p>Log in to your Teacher Dashboard to view full details and take action.</p>
+    <div class="footer">
+      Soma AI — Empowering every African student to learn their way.<br>
+      You are receiving this because you are a registered teacher on Soma AI.
+    </div>
+  </div>
+</body>
+</html>

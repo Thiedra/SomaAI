@@ -1,0 +1,21 @@
+# Virtual environments
+env/
+envsource/
+venv/
+
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+
+# Environment variables (contains DB credentials, API keys!)
+.env
+soma_ai/.env
+
+# Django
+media/
+staticfiles/
+
+# IDE
+.vscode/
+.idea/

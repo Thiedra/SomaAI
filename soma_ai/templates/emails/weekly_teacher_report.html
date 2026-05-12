@@ -1,0 +1,54 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="UTF-8">
+  <style>
+    body { font-family: Inter, Arial, sans-serif; background: #F8F7F4; margin: 0; padding: 0; }
+    .container { max-width: 600px; margin: 40px auto; background: #fff; border-radius: 8px; padding: 32px; }
+    .header { background: #1DC08A; color: white; padding: 20px 32px; border-radius: 8px 8px 0 0; margin: -32px -32px 24px; }
+    .header h1 { margin: 0; font-size: 20px; }
+    .stat-row { display: flex; gap: 16px; margin: 16px 0; }
+    .stat-box { flex: 1; background: #E6F8F2; border-radius: 8px; padding: 16px; text-align: center; }
+    .stat-box .value { font-size: 28px; font-weight: 600; color: #1DC08A; }
+    .stat-box .label { font-size: 12px; color: #555; margin-top: 4px; }
+    .alert-box { background: #FDECE8; border-left: 4px solid #E85030; padding: 12px 16px; border-radius: 4px; margin: 8px 0; }
+    .footer { margin-top: 32px; font-size: 12px; color: #888; }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <div class="header">
+      <h1>Weekly Class Report</h1>
+    </div>
+    <p>Hello <strong>{{ teacher_name }}</strong>! Here is your class summary for this week:</p>
+    <div class="stat-row">
+      <div class="stat-box">
+        <div class="value">{{ total_students }}</div>
+        <div class="label">Total Students</div>
+      </div>
+      <div class="stat-box">
+        <div class="value">{{ avg_class_score }}%</div>
+        <div class="label">Class Average</div>
+      </div>
+      <div class="stat-box">
+        <div class="value">{{ struggling_count }}</div>
+        <div class="label">Need Attention</div>
+      </div>
+    </div>
+    {% if struggling_students %}
+    <p><strong>Students needing your attention this week:</strong></p>
+    {% for student in struggling_students %}
+    <div class="alert-box">
+      <strong>{{ student.name }}</strong> — {{ student.reason }}
+    </div>
+    {% endfor %}
+    {% else %}
+    <p>Great news — no students are currently flagged as struggling!</p>
+    {% endif %}
+    <p>Log in to your Teacher Dashboard for full details.</p>
+    <div class="footer">
+      Soma AI — Supporting teachers to support every student.
+    </div>
+  </div>
+</body>
+</html>
