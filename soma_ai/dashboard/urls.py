@@ -1,26 +1,23 @@
 """
 dashboard/urls.py
-URL routing for teacher dashboard endpoints.
-All routes are prefixed with /api/v1/dashboard/ from the root urls.py.
 """
 from django.urls import path
 from .views import (
-    DashboardOverviewView,
-    DashboardStudentListView,
-    DashboardStudentDetailView,
-    DashboardStrugglingView,
+    TeacherMeView, TeacherStudentsView, TeacherStudentDetailView,
+    TeacherReportsView, DashboardOverviewView, DashboardStudentListView,
+    DashboardStudentDetailView, DashboardStrugglingView,
 )
 
 urlpatterns = [
-    # aggregated class overview
+    # --- Frontend-aligned teacher endpoints ---
+    path("me/", TeacherMeView.as_view(), name="teacher-me"),
+    path("students/", TeacherStudentsView.as_view(), name="teacher-students"),
+    path("students/<uuid:student_id>/", TeacherStudentDetailView.as_view(), name="teacher-student-detail"),
+    path("reports/", TeacherReportsView.as_view(), name="teacher-reports"),
+
+    # --- Internal dashboard endpoints ---
     path("overview/", DashboardOverviewView.as_view(), name="dashboard-overview"),
-
-    # full student list with sorting
-    path("students/", DashboardStudentListView.as_view(), name="dashboard-students"),
-
-    # single student full details
-    path("students/<uuid:student_id>/full/", DashboardStudentDetailView.as_view(), name="dashboard-student-detail"),
-
-    # only struggling students
+    path("overview/students/", DashboardStudentListView.as_view(), name="dashboard-students"),
+    path("overview/students/<uuid:student_id>/full/", DashboardStudentDetailView.as_view(), name="dashboard-student-detail"),
     path("struggling/", DashboardStrugglingView.as_view(), name="dashboard-struggling"),
 ]
