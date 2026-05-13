@@ -1,68 +1,66 @@
 """
 progress/tasks.py
-Celery beat tasks for weekly progress snapshots and inactivity alerts.
-These run on a schedule — not triggered by user actions.
+Celery beat tasks for weekly snapshots and inactivity alerts.
 """
 import logging
 from celery import shared_task
 from django.utils import timezone
 from datetime import timedelta
+from django.db.models import Avg, Sum
 
 logger = logging.getLogger(__name__)
 
 
 @shared_task
 def compute_weekly_snapshots():
-    """
-    Celery beat task — runs every Monday at midnight.
-    Computes a ProgressSnapshot for every active student
-    covering the previous week (Monday to Sunday).
-    """
-    from progress.models import StudySession, ProgressSnapshot
-    from users.models import CustomUser
-    from quizzes.models import QuizAttempt
-    from simplifier.models import Note
+    """Runs every Monday at midnight. Computes WeeklyProgressSnapshot for every student."""
+    from progress.models import StudySession, WeeklyProgressSnapshot, SubjectMastery
+    from users.models import User
+    from quizzes.models import QuizSubmission
+    from simplifier.models import StudentNote
 
     today = timezone.now().date()
-    # find the most recent Monday
     week_start = today - timedelta(days=today.weekday())
     week_end = week_start + timedelta(days=6)
 
-    students = CustomUser.objects.filter(role="student", is_active=True)
+    students = User.objects.filter(role="student", is_active=True)
 
     for student in students:
-        # get all quiz attempts this week
-        attempts = QuizAttempt.objects.filter(
+        submissions = QuizSubmission.objects.filter(
             student=student,
-            completed_at__date__range=(week_start, week_end),
+            submitted_at__date__range=(week_start, week_end),
         )
-        avg_score = (
-            sum(a.score for a in attempts) / attempts.count()
-            if attempts.count() > 0 else 0.0
-        )
+        avg_score = submissions.aggregate(avg=Avg("score_percentage"))["avg"] or 0.0
 
-        # total study minutes from sessions this week
         sessions = StudySession.objects.filter(
             student=student,
-            date__range=(week_start, week_end),
+            session_date__range=(week_start, week_end),
         )
-        total_minutes = sum(s.duration_minutes for s in sessions)
+        total_minutes = sessions.aggregate(total=Sum("duration_minutes"))["total"] or 0
 
-        # notes created this week
-        notes_count = Note.objects.filter(
+        notes_count = StudentNote.objects.filter(
             student=student,
             created_at__date__range=(week_start, week_end),
         ).count()
 
-        # save or update the snapshot for this week
-        ProgressSnapshot.objects.update_or_create(
+        # per-subject scores from SubjectMastery (current snapshot)
+        def subject_score(subj):
+            m = SubjectMastery.objects.filter(student=student, subject=subj).first()
+            return m.value if m else 0.0
+
+        WeeklyProgressSnapshot.objects.update_or_create(
             student=student,
-            week_start=week_start,
+            week_start_date=week_start,
             defaults={
-                "avg_quiz_score": round(avg_score, 2),
+                "average_quiz_score": round(avg_score, 2),
                 "total_study_minutes": total_minutes,
-                "notes_created": notes_count,
-                "quizzes_completed": attempts.count(),
+                "notes_created_count": notes_count,
+                "quizzes_completed_count": submissions.count(),
+                "math_score": subject_score("Math"),
+                "english_score": subject_score("English"),
+                "science_score": subject_score("Science"),
+                "kinyarwanda_score": subject_score("Kinyarwanda"),
+                "social_score": subject_score("Social"),
             },
         )
 
@@ -71,52 +69,41 @@ def compute_weekly_snapshots():
 
 @shared_task
 def check_inactivity_alerts():
-    """
-    Celery beat task — runs every day.
-    Creates an inactivity Alert for any student who has had
-    no study session in the last 3 days.
-    """
-    from progress.models import StudySession, Alert
-    from users.models import CustomUser, TeacherStudentRelationship
+    """Runs every day at 7am. Creates inactivity alerts for inactive students."""
+    from progress.models import StudySession, TeacherAlert
+    from users.models import User, ClassEnrollment
 
     today = timezone.now().date()
     three_days_ago = today - timedelta(days=3)
 
-    students = CustomUser.objects.filter(role="student", is_active=True)
+    students = User.objects.filter(role="student", is_active=True)
 
     for student in students:
-        # check if student has any session in the last 3 days
-        recent_session = StudySession.objects.filter(
+        has_recent = StudySession.objects.filter(
             student=student,
-            date__gte=three_days_ago,
+            session_date__gte=three_days_ago,
         ).exists()
 
-        if recent_session:
-            continue  # student is active — no alert needed
+        if has_recent:
+            continue
 
-        # get linked teachers
-        teachers = TeacherStudentRelationship.objects.filter(
+        teachers = ClassEnrollment.objects.filter(
             student=student
         ).select_related("teacher")
 
         for rel in teachers:
-            # avoid duplicate inactivity alerts on the same day
-            already_alerted = Alert.objects.filter(
+            already_alerted = TeacherAlert.objects.filter(
                 student=student,
                 teacher=rel.teacher,
-                alert_type="inactivity",
+                alert_type=TeacherAlert.AlertType.INACTIVITY,
                 created_at__date=today,
             ).exists()
 
             if not already_alerted:
-                Alert.objects.create(
+                TeacherAlert.objects.create(
                     student=student,
                     teacher=rel.teacher,
-                    alert_type="inactivity",
-                    message=(
-                        f"{student.full_name} has not studied in the last 3 days."
-                    ),
+                    alert_type=TeacherAlert.AlertType.INACTIVITY,
+                    message=f"{student.full_name} has not studied in the last 3 days.",
                 )
-                logger.info(
-                    f"Inactivity alert created for {student.full_name}"
-                )
+                logger.info(f"Inactivity alert created for {student.full_name}")

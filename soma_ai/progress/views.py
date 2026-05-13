@@ -1,7 +1,7 @@
 """
 progress/views.py
-API views for student progress tracking and teacher alert management.
 """
+from django.db.models import Avg, Sum
 from rest_framework import status
 from rest_framework.response import Response
 from rest_framework.views import APIView
@@ -10,14 +10,64 @@ from django.utils import timezone
 from datetime import timedelta
 
 from core.permissions import IsStudent, IsTeacher
-from .models import StudySession, WeeklyProgressSnapshot, TeacherAlert
+from users.models import User, ClassEnrollment
+from .models import SubjectMastery, StudySession, WeeklyProgressSnapshot, TeacherAlert
 from .serializers import (
+    SubjectMasterySerializer, WeeklyProgressFrontendSerializer,
     ProgressSummarySerializer, ProgressSnapshotSerializer, AlertSerializer,
 )
 
 
+class MyMasteryView(APIView):
+    """
+    GET /api/v1/progress/me/mastery/
+    Returns per-subject mastery for the authenticated student.
+    Frontend shape: [{ studentId, subject, value }, ...]
+    """
+    permission_classes = [IsStudent]
+
+    @extend_schema(
+        summary="Get subject mastery",
+        description="Returns mastery percentage for each subject: Math, English, Science, Kinyarwanda, Social.",
+        tags=["Progress"],
+        responses={200: SubjectMasterySerializer(many=True)},
+    )
+    def get(self, request):
+        masteries = SubjectMastery.objects.filter(student=request.user)
+        return Response(SubjectMasterySerializer(masteries, many=True).data)
+
+
+class MyProgressFrontendView(APIView):
+    """
+    GET /api/v1/progress/me/weekly/
+    Returns last 6 weekly snapshots in the exact frontend shape:
+    [{ studentId, week: "W1", math, english, science }, ...]
+    """
+    permission_classes = [IsStudent]
+
+    @extend_schema(
+        summary="Get weekly progress data",
+        description="Returns last 6 weeks of per-subject progress for the frontend chart.",
+        tags=["Progress"],
+        responses={200: WeeklyProgressFrontendSerializer(many=True)},
+    )
+    def get(self, request):
+        snapshots = list(
+            WeeklyProgressSnapshot.objects.filter(
+                student=request.user
+            ).order_by("week_start_date")[:6]
+        )
+        data = []
+        for i, snapshot in enumerate(snapshots):
+            serializer = WeeklyProgressFrontendSerializer(
+                snapshot, context={"index": i}
+            )
+            data.append(serializer.data)
+        return Response(data)
+
+
 class MyProgressView(APIView):
-    """Student — get own overall progress summary including streak."""
+    """GET /api/v1/progress/me/ — overall summary."""
     permission_classes = [IsStudent]
 
     @extend_schema(
@@ -35,37 +85,28 @@ class MyProgressView(APIView):
         sessions = StudySession.objects.filter(student=student)
 
         avg_score = (
-            sum(s.score_percentage for s in submissions) / submissions.count()
-            if submissions.count() > 0 else 0.0
+            submissions.aggregate(avg=Avg("score_percentage"))["avg"] or 0.0
         )
-
+        total_minutes = sessions.aggregate(total=Sum("duration_minutes"))["total"] or 0
         last_session = sessions.first()
-        last_study_date = last_session.session_date if last_session else None
-
-        streak = 0
-        check_date = timezone.now().date()
-        while StudySession.objects.filter(student=student, session_date=check_date).exists():
-            streak += 1
-            check_date -= timedelta(days=1)
 
         data = {
             "total_quizzes": submissions.count(),
             "avg_quiz_score": round(avg_score, 2),
-            "total_study_minutes": sum(s.duration_minutes for s in sessions),
+            "total_study_minutes": total_minutes,
             "total_notes": StudentNote.objects.filter(student=student).count(),
-            "last_study_date": last_study_date,
-            "current_streak_days": streak,
+            "last_study_date": last_session.session_date if last_session else None,
+            "current_streak_days": student.streak,
         }
         return Response(ProgressSummarySerializer(data).data)
 
 
 class MyProgressGraphView(APIView):
-    """Student — get last 8 weeks of progress data for graph display."""
+    """GET /api/v1/progress/me/graph/ — full snapshots for internal use."""
     permission_classes = [IsStudent]
 
     @extend_schema(
-        summary="Get progress graph data",
-        description="Returns weekly snapshots for the last 8 weeks for chart rendering.",
+        summary="Get progress graph data (full snapshots)",
         tags=["Progress"],
         responses={200: ProgressSnapshotSerializer(many=True)},
     )
@@ -82,7 +123,6 @@ class StudentProgressView(APIView):
 
     @extend_schema(
         summary="View a student's progress",
-        description="Teacher views progress summary of one of their linked students.",
         tags=["Progress"],
         responses={
             200: ProgressSummarySerializer,
@@ -91,57 +131,45 @@ class StudentProgressView(APIView):
         },
     )
     def get(self, request, student_id):
-        from users.models import CustomUser, ClassEnrollment
         from quizzes.models import QuizSubmission
         from simplifier.models import StudentNote
 
-        is_linked = ClassEnrollment.objects.filter(
+        if not ClassEnrollment.objects.filter(
             teacher=request.user, student__id=student_id
-        ).exists()
-
-        if not is_linked:
+        ).exists():
             return Response(
                 {"error": "Student not linked to you."},
                 status=status.HTTP_403_FORBIDDEN,
             )
 
         try:
-            student = CustomUser.objects.get(id=student_id, role="student")
-        except CustomUser.DoesNotExist:
+            student = User.objects.get(id=student_id, role="student")
+        except User.DoesNotExist:
             return Response({"error": "Student not found."}, status=status.HTTP_404_NOT_FOUND)
 
         submissions = QuizSubmission.objects.filter(student=student)
         sessions = StudySession.objects.filter(student=student)
-        avg_score = (
-            sum(s.score_percentage for s in submissions) / submissions.count()
-            if submissions.count() > 0 else 0.0
-        )
-        last_session = sessions.first()
 
-        streak = 0
-        check_date = timezone.now().date()
-        while StudySession.objects.filter(student=student, session_date=check_date).exists():
-            streak += 1
-            check_date -= timedelta(days=1)
+        avg_score = submissions.aggregate(avg=Avg("score_percentage"))["avg"] or 0.0
+        total_minutes = sessions.aggregate(total=Sum("duration_minutes"))["total"] or 0
+        last_session = sessions.first()
 
         data = {
             "total_quizzes": submissions.count(),
             "avg_quiz_score": round(avg_score, 2),
-            "total_study_minutes": sum(s.duration_minutes for s in sessions),
+            "total_study_minutes": total_minutes,
             "total_notes": StudentNote.objects.filter(student=student).count(),
             "last_study_date": last_session.session_date if last_session else None,
-            "current_streak_days": streak,
+            "current_streak_days": student.streak,
         }
         return Response(ProgressSummarySerializer(data).data)
 
 
 class AlertListView(APIView):
-    """Teacher — list all alerts for their linked students."""
     permission_classes = [IsTeacher]
 
     @extend_schema(
         summary="List teacher alerts",
-        description="Returns all alerts for the teacher's linked students, newest first.",
         tags=["Progress"],
         responses={200: AlertSerializer(many=True)},
     )
@@ -151,12 +179,10 @@ class AlertListView(APIView):
 
 
 class AlertMarkReadView(APIView):
-    """Teacher — mark a specific alert as read."""
     permission_classes = [IsTeacher]
 
     @extend_schema(
         summary="Mark alert as read",
-        description="Marks a single alert as read. Only the alert's teacher can do this.",
         tags=["Progress"],
         responses={
             200: AlertSerializer,
@@ -168,41 +194,34 @@ class AlertMarkReadView(APIView):
             alert = TeacherAlert.objects.get(id=alert_id, teacher=request.user)
         except TeacherAlert.DoesNotExist:
             return Response({"error": "Alert not found."}, status=status.HTTP_404_NOT_FOUND)
-
         alert.is_read = True
         alert.save(update_fields=["is_read"])
         return Response(AlertSerializer(alert).data)
 
 
 class MotivationView(APIView):
-    """Return a daily motivational message based on student performance."""
     permission_classes = [IsStudent]
 
     @extend_schema(
         summary="Get daily motivation message",
-        description="Returns a motivational message based on the student's average quiz score.",
         tags=["Progress"],
-        responses={200: OpenApiResponse(description="Motivational message and stats")},
+        responses={200: OpenApiResponse(description="Motivational message")},
     )
     def get(self, request):
-        from quizzes.models import QuizSubmission
-        submissions = QuizSubmission.objects.filter(student=request.user)
-        avg = (
-            sum(s.score_percentage for s in submissions) / submissions.count()
-            if submissions.count() > 0 else 0
-        )
-
-        if avg >= 80:
+        avg = request.user.xp / max(request.user.level, 1)
+        if request.user.streak >= 7:
+            message = "Outstanding! A 7-day streak — you are unstoppable!"
+        elif request.user.xp >= 1000:
             message = "Outstanding work! You are mastering your subjects. Keep it up!"
-        elif avg >= 60:
+        elif request.user.streak >= 3:
             message = "Good progress! Every study session brings you closer to your goal."
-        elif avg >= 40:
-            message = "You are improving! Consistency is the key — keep showing up."
         else:
             message = "Every expert was once a beginner. Today is a great day to start again."
 
         return Response({
             "message": message,
-            "avg_score": round(avg, 1),
+            "streak": request.user.streak,
+            "xp": request.user.xp,
+            "level": request.user.level,
             "student_name": request.user.full_name,
         })
