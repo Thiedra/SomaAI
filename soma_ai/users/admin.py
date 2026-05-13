@@ -1,6 +1,5 @@
 """
 users/admin.py
-Admin configuration for User and ClassEnrollment models.
 """
 from django.contrib import admin
 from django.contrib.auth.admin import UserAdmin as BaseUserAdmin
@@ -8,7 +7,6 @@ from .models import User, ClassEnrollment
 
 
 class ClassEnrollmentInline(admin.TabularInline):
-    """Show enrolled students directly on the teacher's admin page."""
     model = ClassEnrollment
     fk_name = "teacher"
     extra = 0
@@ -20,23 +18,43 @@ class ClassEnrollmentInline(admin.TabularInline):
 @admin.register(User)
 class UserAdmin(BaseUserAdmin):
     ordering = ["email"]
-    list_display = ["email", "full_name", "role", "preferred_language", "is_premium", "is_active"]
-    list_filter = ["role", "preferred_language", "is_dyslexic", "is_premium", "is_active"]
-    search_fields = ["email", "full_name"]
-    readonly_fields = ["id", "date_joined"]
+    list_display = [
+        "soma_id", "email", "full_name", "role",
+        "school", "grade", "xp", "level", "streak", "is_active",
+    ]
+    list_filter = [
+        "role", "school", "grade", "is_dyslexic", "is_premium", "is_active",
+    ]
+    search_fields = ["soma_id", "email", "full_name", "school"]
+    readonly_fields = ["id", "soma_id", "date_joined", "last_login_date"]
     inlines = [ClassEnrollmentInline]
 
     fieldsets = (
-        ("Account", {"fields": ("id", "email", "password")}),
-        ("Personal Info", {"fields": ("full_name", "role", "preferred_language")}),
-        ("Learning Profile", {"fields": ("learning_style", "is_dyslexic", "is_premium")}),
-        ("Permissions", {"fields": ("is_active", "is_staff", "is_superuser")}),
-        ("Dates", {"fields": ("date_joined",)}),
+        ("Account", {
+            "fields": ("id", "soma_id", "email", "password")
+        }),
+        ("Personal Info", {
+            "fields": ("full_name", "role", "school", "grade", "class_grade")
+        }),
+        ("Gamification", {
+            "fields": ("xp", "level", "streak", "last_login_date", "weak_subject", "badges")
+        }),
+        ("Learning Profile", {
+            "fields": ("preferred_language", "learning_style", "is_dyslexic", "is_premium")
+        }),
+        ("Permissions", {
+            "fields": ("is_active", "is_staff", "is_superuser")
+        }),
+        ("Dates", {
+            "fields": ("date_joined",)
+        }),
     )
+
     add_fieldsets = (
         (None, {
             "fields": (
-                "email", "full_name", "password1", "password2", "role",
+                "email", "full_name", "password1", "password2",
+                "role", "school", "grade",
             )
         }),
     )
@@ -46,5 +64,8 @@ class UserAdmin(BaseUserAdmin):
 class ClassEnrollmentAdmin(admin.ModelAdmin):
     list_display = ["student", "teacher", "enrolled_at"]
     list_filter = ["enrolled_at"]
-    search_fields = ["teacher__email", "student__email", "teacher__full_name", "student__full_name"]
+    search_fields = [
+        "teacher__soma_id", "student__soma_id",
+        "teacher__full_name", "student__full_name",
+    ]
     readonly_fields = ["enrolled_at"]
