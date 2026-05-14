@@ -2,16 +2,14 @@ from pathlib import Path
 from decouple import config, Csv
 import dj_database_url
 
+from datetime import timedelta
+from celery.schedules import crontab
 BASE_DIR = Path(__file__).resolve().parent.parent
 
 SECRET_KEY = config("DJANGO_SECRET_KEY")
 DEBUG = config("DJANGO_DEBUG", default=False, cast=bool)
 ALLOWED_HOSTS = config("ALLOWED_HOSTS", default="localhost", cast=Csv())
-# AUTH_USER_MODEL = "users.CustomUser"
 AUTH_USER_MODEL = "users.User"
-
-
-
 
 DJANGO_APPS = [
     "django.contrib.admin",
@@ -41,6 +39,12 @@ LOCAL_APPS = [
     "career",
     "dashboard",
     "notifications",
+    "homework",
+    "community",
+    "library",
+    "ai_proxy",
+    "games",
+    
 ]
 
 INSTALLED_APPS = DJANGO_APPS + THIRD_PARTY_APPS + LOCAL_APPS
@@ -133,12 +137,19 @@ SPECTACULAR_SETTINGS = {
         {"name": "Planner"},
         {"name": "Career"},
         {"name": "Dashboard"},
+        {"name": "Homework"},
+        {"name": "Assignments"},
+        {"name": "Community"},
+        {"name": "Library"},
+        {"name": "AI Proxy"},
+        {"name": "Games"},
+
     ],
 }
 
 # --- AI Keys ---
-GROQ_API_KEY = config("GROQ_API_KEY", default="")
-OPENAI_API_KEY = config("OPENAI_API_KEY", default="")
+COHERE_API_KEY = config("COHERE_API_KEY", default="")
+
 
 # --- Static / Media ---
 STATIC_URL = "/static/"
@@ -161,8 +172,6 @@ EMAIL_HOST_PASSWORD = config("EMAIL_HOST_PASSWORD", default="")
 DEFAULT_FROM_EMAIL = config("DEFAULT_FROM_EMAIL", default="Soma AI <noreply@somaai.rw>")
 
 # --- Celery Beat Schedule and Email configulation stuffs ---
-from celery.schedules import crontab
-
 CELERY_BEAT_SCHEDULE = {
     # every Monday at 8am Kigali time
     "weekly-student-summary": {
@@ -186,7 +195,6 @@ CELERY_BEAT_SCHEDULE = {
 }
 
 # --- Simple JWT ---
-from datetime import timedelta
 SIMPLE_JWT = {
     "ACCESS_TOKEN_LIFETIME": timedelta(hours=1),
     "REFRESH_TOKEN_LIFETIME": timedelta(days=7),

@@ -12,25 +12,23 @@ logger = logging.getLogger(__name__)
 @shared_task(bind=True, max_retries=3)
 def simplify_note_task(self, note_id: str):
     """
-    Celery task: simplify a note using Groq AI.
+    Celery task: simplify a note using Cohere AI.
     Retries up to 3 times on failure with exponential backoff.
 
     Args:
         note_id: UUID string of the StudentNote to simplify.
     """
     from .models import StudentNote, SimplifiedNote
-    from simplifier.services.ai.groq_service import GroqService
+    from services.ai.cohere_service import CohereService
 
     try:
         note = StudentNote.objects.select_related("student").get(id=note_id)
         student = note.student
 
-        # get the text to simplify — from pasted text or uploaded file
         original_text = note.text_content
         if not original_text and note.uploaded_file:
             original_text = note.uploaded_file.read().decode("utf-8", errors="ignore")
 
-        # build dyslexia context string for the prompt
         dyslexic_context = (
             "has dyslexia (use very short sentences, avoid complex words)"
             if student.is_dyslexic
@@ -38,7 +36,6 @@ def simplify_note_task(self, note_id: str):
         )
         learning_style = student.learning_style or "general"
 
-        # build the simplification prompt
         prompt = f"""
 You are helping a {learning_style} learner who {dyslexic_context}.
 Simplify the text below written in {note.language}.
@@ -48,24 +45,22 @@ Return ONLY valid JSON:
 
 Text: {original_text}
 """
-        service = GroqService()
+        service = CohereService()
         result = service.call(prompt, max_tokens=2000, feature="simplifier")
 
-        # save or update the simplified note
         SimplifiedNote.objects.update_or_create(
             original_note=note,
             defaults={
                 "simplified_text": result["simplified_text"],
                 "glossary": result.get("glossary", []),
                 "reading_level": "simple" if student.is_dyslexic else "intermediate",
-                "ai_model_used": GroqService.MODEL,
+                "ai_model_used": CohereService.MODEL,
             },
         )
         logger.info(f"Note {note_id} simplified successfully.")
 
     except Exception as exc:
         logger.error(f"simplify_note_task failed for {note_id}: {exc}")
-        # retry with exponential backoff: 60s, 120s, 240s
         raise self.retry(exc=exc, countdown=60 * (2 ** self.request.retries))
 
 
@@ -86,15 +81,13 @@ def generate_tts_task(self, audio_id: str):
             "simplified_note__original_note"
         ).get(id=audio_id)
 
-        # mark as processing so the frontend knows it started
         audio.status = "processing"
         audio.save(update_fields=["status"])
 
         text = audio.simplified_note.simplified_text
 
         # --- TTS generation placeholder ---
-        # Replace this block with a real TTS provider (e.g. Google TTS, ElevenLabs)
-        # For now we save a placeholder text file to confirm the flow works
+        # Replace with a real TTS provider (e.g. Google TTS, ElevenLabs)
         audio_content = ContentFile(
             f"TTS audio for: {text[:100]}".encode("utf-8")
         )
@@ -107,6 +100,5 @@ def generate_tts_task(self, audio_id: str):
 
     except Exception as exc:
         logger.error(f"generate_tts_task failed for {audio_id}: {exc}")
-        # mark as failed so the frontend stops polling
         AudioGeneration.objects.filter(id=audio_id).update(status="failed")
         raise self.retry(exc=exc, countdown=60 * (2 ** self.request.retries))

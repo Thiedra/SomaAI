@@ -1,11 +1,6 @@
 """
 notifications/tasks.py
 Celery tasks for sending email notifications.
-
-Tasks:
-  - send_alert_email: fires immediately when an Alert is created
-  - send_all_weekly_student_summaries: runs every Monday 8am
-  - send_all_weekly_teacher_reports: runs every Monday 8am
 """
 import logging
 from celery import shared_task
@@ -18,36 +13,24 @@ logger = logging.getLogger(__name__)
 
 @shared_task(bind=True, max_retries=3)
 def send_alert_email(self, alert_id: str):
-    """
-    Send an email to the teacher immediately when an alert is created.
-    Triggered by the post_save signal on the Alert model.
-
-    Args:
-        alert_id: UUID string of the Alert to send.
-    """
-    from progress.models import Alert
-
+    from progress.models import TeacherAlert
     try:
-        alert = Alert.objects.select_related("teacher", "student").get(id=alert_id)
-
-        # render the HTML email template
+        alert = TeacherAlert.objects.select_related("teacher", "student").get(id=alert_id)
         html_message = render_to_string("emails/alert_email.html", {
             "teacher_name": alert.teacher.full_name,
             "student_name": alert.student.full_name,
             "alert_type": alert.get_alert_type_display(),
             "message": alert.message,
         })
-
         send_mail(
             subject=f"Soma AI Alert — {alert.student.full_name} needs attention",
-            message=alert.message,  # plain text fallback
+            message=alert.message,
             from_email=settings.DEFAULT_FROM_EMAIL,
             recipient_list=[alert.teacher.email],
             html_message=html_message,
             fail_silently=False,
         )
-        logger.info(f"Alert email sent to {alert.teacher.email} for {alert.student.full_name}")
-
+        logger.info(f"Alert email sent to {alert.teacher.email}")
     except Exception as exc:
         logger.error(f"send_alert_email failed for alert {alert_id}: {exc}")
         raise self.retry(exc=exc, countdown=60 * (2 ** self.request.retries))
@@ -55,12 +38,8 @@ def send_alert_email(self, alert_id: str):
 
 @shared_task
 def send_all_weekly_student_summaries():
-    """
-    Celery beat task — runs every Monday at 8am.
-    Sends a weekly summary email to every active student.
-    """
-    from users.models import CustomUser
-    students = CustomUser.objects.filter(role="student", is_active=True)
+    from users.models import User
+    students = User.objects.filter(role="student", is_active=True)
     for student in students:
         send_weekly_student_summary.delay(str(student.id))
     logger.info(f"Queued weekly summaries for {students.count()} students.")
@@ -68,58 +47,49 @@ def send_all_weekly_student_summaries():
 
 @shared_task(bind=True, max_retries=3)
 def send_weekly_student_summary(self, student_id: str):
-    """
-    Send a weekly progress summary email to a single student.
-
-    Args:
-        student_id: UUID string of the student.
-    """
-    from users.models import CustomUser
-    from quizzes.models import QuizAttempt
+    from users.models import User
+    from quizzes.models import QuizSubmission
     from progress.models import StudySession
     from django.utils import timezone
     from datetime import timedelta
 
     try:
-        student = CustomUser.objects.get(id=student_id)
+        student = User.objects.get(id=student_id)
         today = timezone.now().date()
         week_start = today - timedelta(days=today.weekday())
         week_end = week_start + timedelta(days=6)
 
-        # get this week's stats
-        attempts = QuizAttempt.objects.filter(
+        submissions = QuizSubmission.objects.filter(
             student=student,
-            completed_at__date__range=(week_start, week_end),
+            submitted_at__date__range=(week_start, week_end),
         )
         sessions = StudySession.objects.filter(
             student=student,
-            date__range=(week_start, week_end),
+            session_date__range=(week_start, week_end),
         )
 
         avg_score = (
-            round(sum(a.score for a in attempts) / attempts.count(), 1)
-            if attempts.count() > 0 else 0
+            round(sum(s.score_percentage for s in submissions) / submissions.count(), 1)
+            if submissions.count() > 0 else 0
         )
         study_minutes = sum(s.duration_minutes for s in sessions)
 
-        # pick motivational message based on performance
         if avg_score >= 80:
             motivational_message = "Outstanding week! You are on fire. Keep it up!"
         elif avg_score >= 60:
             motivational_message = "Great progress this week! Every session counts."
-        elif attempts.count() == 0:
+        elif submissions.count() == 0:
             motivational_message = "A new week is a fresh start. You can do this!"
         else:
             motivational_message = "Keep going — consistency is the key to success."
 
         html_message = render_to_string("emails/weekly_student_summary.html", {
             "student_name": student.full_name,
-            "quizzes_completed": attempts.count(),
+            "quizzes_completed": submissions.count(),
             "avg_score": avg_score,
             "study_minutes": study_minutes,
             "motivational_message": motivational_message,
         })
-
         send_mail(
             subject="Your Weekly Study Summary — Soma AI",
             message=f"Hi {student.full_name}, here is your weekly summary.",
@@ -129,7 +99,6 @@ def send_weekly_student_summary(self, student_id: str):
             fail_silently=False,
         )
         logger.info(f"Weekly summary sent to {student.email}")
-
     except Exception as exc:
         logger.error(f"send_weekly_student_summary failed for {student_id}: {exc}")
         raise self.retry(exc=exc, countdown=60 * (2 ** self.request.retries))
@@ -137,12 +106,8 @@ def send_weekly_student_summary(self, student_id: str):
 
 @shared_task
 def send_all_weekly_teacher_reports():
-    """
-    Celery beat task — runs every Monday at 8am.
-    Sends a weekly class report to every active teacher.
-    """
-    from users.models import CustomUser
-    teachers = CustomUser.objects.filter(role="teacher", is_active=True)
+    from users.models import User
+    teachers = User.objects.filter(role="teacher", is_active=True)
     for teacher in teachers:
         send_weekly_teacher_report.delay(str(teacher.id))
     logger.info(f"Queued weekly reports for {teachers.count()} teachers.")
@@ -150,55 +115,45 @@ def send_all_weekly_teacher_reports():
 
 @shared_task(bind=True, max_retries=3)
 def send_weekly_teacher_report(self, teacher_id: str):
-    """
-    Send a weekly class report email to a single teacher.
-
-    Args:
-        teacher_id: UUID string of the teacher.
-    """
-    from users.models import CustomUser, TeacherStudentRelationship
-    from quizzes.models import QuizAttempt
-    from progress.models import StudySession, Alert
+    from users.models import User, ClassEnrollment
+    from quizzes.models import QuizSubmission
+    from progress.models import StudySession
     from django.utils import timezone
     from datetime import timedelta
 
     try:
-        teacher = CustomUser.objects.get(id=teacher_id)
+        teacher = User.objects.get(id=teacher_id)
         today = timezone.now().date()
         seven_days_ago = today - timedelta(days=7)
         three_days_ago = today - timedelta(days=3)
 
-        # get all linked students
-        students = CustomUser.objects.filter(
-            linked_teachers__teacher=teacher, role="student"
+        students = User.objects.filter(
+            enrolled_teachers__teacher=teacher, role="student"
         )
-
         if not students.exists():
-            return  # no students — skip this teacher
+            return
 
-        # calculate class average score this week
         all_scores = []
         struggling_students = []
 
         for student in students:
-            recent_attempts = QuizAttempt.objects.filter(
+            recent_submissions = QuizSubmission.objects.filter(
                 student=student,
-                completed_at__date__gte=seven_days_ago,
+                submitted_at__date__gte=seven_days_ago,
             )
             avg = (
-                sum(a.score for a in recent_attempts) / recent_attempts.count()
-                if recent_attempts.count() > 0 else None
+                sum(s.score_percentage for s in recent_submissions) / recent_submissions.count()
+                if recent_submissions.count() > 0 else None
             )
             if avg is not None:
                 all_scores.append(avg)
 
-            # check if struggling
             reasons = []
             if avg is not None and avg < 50:
                 reasons.append(f"Low quiz score: {round(avg, 1)}%")
 
             has_recent = StudySession.objects.filter(
-                student=student, date__gte=three_days_ago
+                student=student, session_date__gte=three_days_ago
             ).exists()
             if not has_recent:
                 reasons.append("Inactive for 3+ days")
@@ -210,8 +165,7 @@ def send_weekly_teacher_report(self, teacher_id: str):
                 })
 
         avg_class_score = (
-            round(sum(all_scores) / len(all_scores), 1)
-            if all_scores else 0
+            round(sum(all_scores) / len(all_scores), 1) if all_scores else 0
         )
 
         html_message = render_to_string("emails/weekly_teacher_report.html", {
@@ -221,7 +175,6 @@ def send_weekly_teacher_report(self, teacher_id: str):
             "struggling_count": len(struggling_students),
             "struggling_students": struggling_students,
         })
-
         send_mail(
             subject="Your Weekly Class Report — Soma AI",
             message=f"Hi {teacher.full_name}, here is your weekly class report.",
@@ -231,7 +184,6 @@ def send_weekly_teacher_report(self, teacher_id: str):
             fail_silently=False,
         )
         logger.info(f"Weekly teacher report sent to {teacher.email}")
-
     except Exception as exc:
         logger.error(f"send_weekly_teacher_report failed for {teacher_id}: {exc}")
         raise self.retry(exc=exc, countdown=60 * (2 ** self.request.retries))

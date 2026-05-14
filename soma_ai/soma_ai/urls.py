@@ -8,6 +8,9 @@ from django.views.generic import RedirectView
 from drf_spectacular.views import (
     SpectacularAPIView, SpectacularSwaggerView, SpectacularRedocView,
 )
+from homework.urls import homework_urlpatterns, assignment_urlpatterns
+from library.urls import book_urlpatterns
+
 
 urlpatterns = [
     path("", RedirectView.as_view(url="/api/docs/"), name="home"),
@@ -16,14 +19,27 @@ urlpatterns = [
     path("api/docs/", SpectacularSwaggerView.as_view(url_name="schema"), name="swagger-ui"),
     path("api/redoc/", SpectacularRedocView.as_view(url_name="schema"), name="redoc"),
 
-    # app routes
+    # auth
     path("api/v1/auth/", include("users.urls")),
+
+    # student features
     path("api/v1/notes/", include("simplifier.urls")),
     path("api/v1/quizzes/", include("quizzes.urls")),
     path("api/v1/progress/", include("progress.urls")),
-    path("api/v1/alerts/", include("progress.alert_urls")),
-    path("api/v1/planner/", include("planner.urls")),   
+    path("api/v1/planner/", include("planner.urls")),
     path("api/v1/career/", include("career.urls")),
-    path("api/v1/dashboard/", include("dashboard.urls")),  
+    path("api/v1/homework/", include((homework_urlpatterns, "homework"))),
+    path("api/v1/community/", include("community.urls")),  
+    path("api/v1/videos/", include("library.urls")),                 
+    path("api/v1/library/", include((book_urlpatterns, "library"))),    
+
+    # teacher features
+    path("api/v1/teacher/", include("dashboard.urls")),
+    path("api/v1/assignments/", include((assignment_urlpatterns, "assignments"))),
+    # Ai features
+    path("api/v1/ai/", include("ai_proxy.urls")),
+    # Games
+    path("api/v1/games/", include("games.urls")),
+
 
 ]

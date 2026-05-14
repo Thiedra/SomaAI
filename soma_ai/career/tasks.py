@@ -9,26 +9,26 @@ logger = logging.getLogger(__name__)
 
 
 @shared_task(bind=True, max_retries=3)
-def generate_career_paths_task(self, profile_id: str):
+def generate_career_paths_task(self, assessment_id: str):
     """
-    Celery task: generate 3 ranked career paths using Claude AI.
-    Deletes old career paths and saves new ones on success.
+    Celery task: generate 3 ranked career paths using Cohere AI.
+    Deletes old recommendations and saves new ones on success.
 
     Args:
-        profile_id: UUID string of the CareerProfile to process.
+        assessment_id: UUID string of the CareerAssessment to process.
     """
-    from .models import CareerProfile, CareerPath
-    from simplifier.services.ai.claude_service import ClaudeService
-    import json
+    from .models import CareerAssessment, CareerRecommendation
+    from services.ai.cohere_service import CohereService
 
     try:
-        profile = CareerProfile.objects.select_related("student").get(id=profile_id)
-        student = profile.student
+        assessment = CareerAssessment.objects.select_related("student").get(
+            id=assessment_id
+        )
+        student = assessment.student
 
-        # format answers for the prompt
         answers_text = "\n".join(
             f"- {qid}: {answer}"
-            for qid, answer in profile.answers.items()
+            for qid, answer in assessment.question_answers.items()
         )
 
         prompt = f"""
@@ -36,7 +36,7 @@ You are a career counselor helping an African student choose a career path.
 The student is from Rwanda/Africa.
 
 Student profile:
-- Language: {student.language}
+- Preferred language: {student.preferred_language}
 - Learning style: {student.learning_style or "not specified"}
 - Has dyslexia: {student.is_dyslexic}
 
@@ -51,10 +51,10 @@ Return ONLY valid JSON:
   "careers": [
     {{
       "rank": 1,
-      "title": "...",
-      "description": "...",
+      "career_title": "...",
+      "career_description": "...",
       "required_subjects": ["...", "..."],
-      "universities": [
+      "african_universities": [
         {{"name": "...", "location": "...", "duration_years": 4}}
       ],
       "match_score": 92.5
@@ -62,20 +62,19 @@ Return ONLY valid JSON:
   ]
 }}
 """
-        service = ClaudeService()
+        service = CohereService()
         result = service.call(prompt, max_tokens=2000, feature="career")
 
-        # delete old career paths before saving new ones
-        CareerPath.objects.filter(profile=profile).delete()
+        # delete old recommendations before saving new ones
+        CareerRecommendation.objects.filter(assessment=assessment).delete()
 
-        # save the 3 ranked career paths
         for career in result.get("careers", []):
-            CareerPath.objects.create(
-                profile=profile,
-                title=career["title"],
-                description=career["description"],
+            CareerRecommendation.objects.create(
+                assessment=assessment,
+                career_title=career["career_title"],
+                career_description=career["career_description"],
                 required_subjects=career.get("required_subjects", []),
-                universities=career.get("universities", []),
+                african_universities=career.get("african_universities", []),
                 match_score=career.get("match_score", 0.0),
                 rank=career["rank"],
             )
@@ -83,5 +82,5 @@ Return ONLY valid JSON:
         logger.info(f"Career paths generated for {student.full_name}")
 
     except Exception as exc:
-        logger.error(f"generate_career_paths_task failed for {profile_id}: {exc}")
+        logger.error(f"generate_career_paths_task failed for {assessment_id}: {exc}")
         raise self.retry(exc=exc, countdown=60 * (2 ** self.request.retries))

@@ -1,61 +1,87 @@
 """
 planner/serializers.py
-Serializers for study plan creation, exam dates, and daily slot management.
+
+Serializers for the Study Planner calendar event endpoints.
+
+CalendarEventSerializer       — used for GET (list) and POST (create).
+CalendarEventUpdateSerializer — used for PUT (partial update). All fields
+                                 are optional so the frontend can send only
+                                 the changed fields (e.g. just { done: true }).
+
+Frontend field mapping:
+    Frontend key   →  Model field
+    ─────────────────────────────
+    dueNotified    →  due_notified
+    (all others match 1:1)
 """
 from rest_framework import serializers
-from .models import StudyPlan, ExamDate, DailySlot
+from .models import CalendarEvent
 
 
-class ExamDateSerializer(serializers.ModelSerializer):
-    """Serializes a single exam date entry."""
+def _validate_mark(value):
+    """Reusable mark validator — ensures value is between 0 and 100."""
+    if value is not None and not (0 <= value <= 100):
+        raise serializers.ValidationError(
+            "Mark must be an integer between 0 and 100."
+        )
+    return value
+
+
+class CalendarEventSerializer(serializers.ModelSerializer):
+    """
+    Primary serializer for CalendarEvent.
+
+    Used by:
+      GET  /api/v1/planner/events/     — list all events
+      POST /api/v1/planner/events/     — create a new event
+
+    The `student` field is intentionally excluded — it is injected
+    server-side from request.user so the client cannot spoof ownership.
+
+    `dueNotified` uses camelCase to match the frontend CalEvent type.
+    """
+    dueNotified = serializers.BooleanField(
+        source="due_notified",
+        required=False,
+        default=False,
+        help_text="True once the frontend has shown a due-date notification.",
+    )
+
     class Meta:
-        model = ExamDate
-        fields = ["id", "subject", "exam_date", "priority"]
+        model = CalendarEvent
+        fields = [
+            "id", "title", "date", "color",
+            "type", "done", "mark", "dueNotified",
+        ]
         read_only_fields = ["id"]
 
-
-class DailySlotSerializer(serializers.ModelSerializer):
-    """Serializes a daily study slot."""
-    class Meta:
-        model = DailySlot
-        fields = [
-            "id", "date", "start_time", "end_time",
-            "subject", "goal", "is_completed", "is_ai_adjusted",
-        ]
-        read_only_fields = ["id", "is_ai_adjusted"]
+    def validate_mark(self, value):
+        return _validate_mark(value)
 
 
-class StudyPlanSerializer(serializers.ModelSerializer):
+class CalendarEventUpdateSerializer(serializers.ModelSerializer):
     """
-    Serializes a full study plan including exam dates and slots.
-    Used for reading plan details.
-    """
-    exam_dates = ExamDateSerializer(many=True, read_only=True)
-    slots = DailySlotSerializer(many=True, read_only=True)
+    Partial update serializer for CalendarEvent.
 
-    class Meta:
-        model = StudyPlan
-        fields = ["id", "is_active", "created_at", "exam_dates", "slots"]
-        read_only_fields = ["id", "is_active", "created_at"]
+    Used by:
+      PUT /api/v1/planner/events/<id>/  — update any subset of fields
 
-
-class CreateStudyPlanSerializer(serializers.Serializer):
+    All fields are optional — the frontend typically sends a single
+    changed field (e.g. { done: true } when ticking off a task, or
+    { mark: 85 } when a teacher grades an assignment).
     """
-    Input serializer for creating a new study plan.
-    Accepts exam dates and study preferences to pass to the AI.
-    """
-    exam_dates = ExamDateSerializer(many=True)
-    hours_per_day = serializers.FloatField(
-        min_value=0.5, max_value=12.0, default=2.0
-    )
-    weak_subjects = serializers.ListField(
-        child=serializers.CharField(max_length=100),
+    dueNotified = serializers.BooleanField(
+        source="due_notified",
         required=False,
-        default=list,
+        help_text="Set to true once the due-date notification has been shown.",
     )
 
-    def validate_exam_dates(self, value):
-        """At least one exam date must be provided."""
-        if not value:
-            raise serializers.ValidationError("At least one exam date is required.")
-        return value
+    class Meta:
+        model = CalendarEvent
+        fields = [
+            "title", "date", "color",
+            "type", "done", "mark", "dueNotified",
+        ]
+
+    def validate_mark(self, value):
+        return _validate_mark(value)

@@ -208,7 +208,7 @@ class MotivationView(APIView):
         responses={200: OpenApiResponse(description="Motivational message")},
     )
     def get(self, request):
-        avg = request.user.xp / max(request.user.level, 1)
+        # avg = request.user.xp / max(request.user.level, 1)
         if request.user.streak >= 7:
             message = "Outstanding! A 7-day streak — you are unstoppable!"
         elif request.user.xp >= 1000:
