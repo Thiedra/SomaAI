@@ -1,0 +1,11 @@
+[build]
+builder = "NIXPACKS"
+
+[deploy]
+startCommand = "gunicorn soma_ai.wsgi:application --bind 0.0.0.0:$PORT"
+healthcheckPath = "/"
+healthcheckTimeout = 300
+restartPolicyType = "ON_FAILURE"
+
+[build.buildCommand]
+command = "python soma_ai/manage.py migrate && python soma_ai/manage.py collectstatic --noinput"
