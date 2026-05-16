@@ -8,7 +8,7 @@ BASE_DIR = Path(__file__).resolve().parent.parent
 
 SECRET_KEY = config("DJANGO_SECRET_KEY")
 DEBUG = config("DJANGO_DEBUG", default=False, cast=bool)
-ALLOWED_HOSTS = config("ALLOWED_HOSTS", default="localhost,.railway.app", cast=Csv())
+ALLOWED_HOSTS = config("ALLOWED_HOSTS", default="localhost,.railway.app,*", cast=Csv())
 AUTH_USER_MODEL = "users.User"
 
 DJANGO_APPS = [
