@@ -10,10 +10,11 @@ from drf_spectacular.views import (
 )
 from homework.urls import homework_urlpatterns, assignment_urlpatterns
 from library.urls import book_urlpatterns
+from django.http import HttpResponse
 
 
 urlpatterns = [
-    path("", RedirectView.as_view(url="/api/docs/"), name="home"),
+    path("", lambda request: HttpResponse("ok"), name="healthcheck"),
     path("admin/", admin.site.urls),
     path("api/schema/", SpectacularAPIView.as_view(), name="schema"),
     path("api/docs/", SpectacularSwaggerView.as_view(url_name="schema"), name="swagger-ui"),
